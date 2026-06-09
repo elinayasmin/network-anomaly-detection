@@ -72,7 +72,8 @@ Then run:
 python capture/ingest.py -- in one terminal 
 python api/app.py -- in one terminal  (let it run)
 
-<img width="864" height="432" alt="image" src="https://github.com/user-attachments/assets/5d2984b6-a09d-404f-8a7c-7702134e5f81" />
+<img width="395" height="212" alt="image" src="https://github.com/user-attachments/assets/525702b1-ee96-41cb-95d5-5bd392fbdce5" />
+
 
 
 
