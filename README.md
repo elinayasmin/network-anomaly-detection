@@ -72,7 +72,8 @@ Then run:
 python capture/ingest.py -- in one terminal 
 python api/app.py -- in one terminal  (let it run)
 
-![Model Results](https://github.com/user-attachments/assets/632045a4-fcd4-489c-a122-2ef1e6ef1c79) 
+<img width="864" height="432" alt="image" src="https://github.com/user-attachments/assets/5d2984b6-a09d-404f-8a7c-7702134e5f81" />
+
 
 
 
