@@ -72,6 +72,8 @@ Then run:
 python capture/ingest.py -- in one terminal 
 python api/app.py -- in one terminal  (let it run)
 
+![Model Results](https://github.com/user-attachments/assets/632045a4-fcd4-489c-a122-2ef1e6ef1c79) 
+
 
 
 
