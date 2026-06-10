@@ -1,8 +1,11 @@
 from flask import Flask, request, jsonify
 import sqlite3
 import datetime
+from flask_cors import CORS   # ← add after Flask import
+                    # ← add right after app = Flask(__name__)
 
 app = Flask(__name__)
+CORS(app) 
 DB = "anomalies.db"
 
 # --- Database setup ---
