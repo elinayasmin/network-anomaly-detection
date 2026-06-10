@@ -52,10 +52,30 @@ Prerequisites
 3. tshark / Wireshark installed
 4. Git
 
-#Branching Strategy
+
 1. main : Stable, production-ready code only
 2. feature/capture-pipeline : P1 — live pyshark capture
 3. feature/traffic-generator : P2 — Scapy traffic generation
 4. feature/ml-model : P3 — ML training and inference
 5. feature/dashboard : P4 — frontend dashboard
-   
+
+
+#Dataset Setup:
+The project uses the **CICIDS2017 dataset** for network anomaly detection.
+Download the dataset:
+1. Go to: https://www.unb.ca/cic/datasets/ids-2017.html
+2. Download the following CSV files into `capture/` folder:
+   - Monday-WorkingHours.pcap_ISCX.csv
+   - Tuesday-WorkingHours.pcap_ISCX.csv
+   - Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv
+Then run:
+python capture/ingest.py -- in one terminal 
+python api/app.py -- in one terminal  (let it run)
+
+<img width="395" height="212" alt="image" src="https://github.com/user-attachments/assets/525702b1-ee96-41cb-95d5-5bd392fbdce5" />
+
+
+
+
+
+
