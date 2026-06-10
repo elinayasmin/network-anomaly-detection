@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Network Anomaly Detection — Dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:         #0a0e1a;
+      --surface:    #111827;
+      --surface2:   #1a2235;
+      --border:     #1e2d45;
+      --accent:     #00d4ff;
+      --accent2:    #ff4757;
+      --accent3:    #2ed573;
+      --warn:       #ffa502;
+      --text:       #e2e8f0;
+      --text-muted: #64748b;
+      --font-mono:  'JetBrains Mono', monospace;
+      --font-sans:  'Inter', sans-serif;
+    }
+    body { background: var(--bg); color: var(--text); font-family: var(--font-sans); min-height: 100vh; }
+    #root { min-height: 100vh; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const API = "http://127.0.0.1:5000";
+
+function fmtTime(iso) {
+  return new Date(iso).toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", second:"2-digit" });
+}
+function scoreColor(s) { return s >= 0.85 ? "#ff4757" : s >= 0.60 ? "#ffa502" : "#2ed573"; }
+function scoreLabel(s) { return s >= 0.85 ? "CRITICAL" : s >= 0.60 ? "HIGH" : "MEDIUM"; }
+
+// ── Chart wrapper ──────────────────────────────────────────────────────────────
+function ChartCanvas({ type, data, options, height = 200 }) {
+  const ref = useRef(null);
+  const instance = useRef(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    if (instance.current) instance.current.destroy();
+    instance.current = new Chart(ref.current, { type, data, options });
+    return () => { if (instance.current) instance.current.destroy(); };
+  }, [JSON.stringify(data)]);
+  return <canvas ref={ref} style={{ height, maxHeight: height }} />;
+}
+
+// ── Stat Card ──────────────────────────────────────────────────────────────────
+function StatCard({ label, value, sub, accent }) {
+  return (
+    <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderTop:`2px solid ${accent}`, borderRadius:8, padding:"20px 24px" }}>
+      <div style={{ fontSize:11, fontFamily:"var(--font-mono)", color:"var(--text-muted)", letterSpacing:2, textTransform:"uppercase", marginBottom:6 }}>{label}</div>
+      <div style={{ fontSize:32, fontWeight:700, fontFamily:"var(--font-mono)", color:accent, lineHeight:1, marginBottom:4 }}>{value}</div>
+      {sub && <div style={{ fontSize:12, color:"var(--text-muted)" }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ── Score Badge ────────────────────────────────────────────────────────────────
+function Badge({ score }) {
+  const c = scoreColor(score), l = scoreLabel(score);
+  return (
+    <span style={{ background:c+"22", color:c, border:`1px solid ${c}55`, borderRadius:4, padding:"2px 8px", fontSize:11, fontFamily:"var(--font-mono)", fontWeight:700, letterSpacing:1 }}>
+      {l}
+    </span>
+  );
+}
+
+// ── Main App ───────────────────────────────────────────────────────────────────
+function App() {
+  const [anomalies, setAnomalies] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState(null);
+  const [lastRefresh, setLastRefresh] = useState(null);
+  const [page, setPage]           = useState(1);
+  const [filter, setFilter]       = useState("all");
+  const PER_PAGE = 15;
+
+  const fetchData = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/anomalies`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setAnomalies(data);
+      setLastRefresh(new Date());
+      setError(null);
+    } catch(e) {
+      setError(`Cannot reach Flask API at ${API} — is it running?`);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+    const t = setInterval(fetchData, 30000);
+    return () => clearInterval(t);
+  }, [fetchData]);
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const total    = anomalies.length;
+  const critical = anomalies.filter(a => a.anomaly_score >= 0.85).length;
+  const high     = anomalies.filter(a => a.anomaly_score >= 0.60 && a.anomaly_score < 0.85).length;
+  const avgScore = total ? (anomalies.reduce((s,a) => s + a.anomaly_score, 0) / total).toFixed(3) : "0.000";
+
+  // Score histogram buckets
+  const buckets = Array(10).fill(0);
+  anomalies.forEach(a => { buckets[Math.min(Math.floor(a.anomaly_score * 10), 9)]++; });
+  const histLabels = ["0.0","0.1","0.2","0.3","0.4","0.5","0.6","0.7","0.8","0.9"];
+  const histColors = histLabels.map((_,i) => i >= 8 ? "#ff475799" : i >= 6 ? "#ffa50299" : "#00d4ff99");
+  const histBorders = histLabels.map((_,i) => i >= 8 ? "#ff4757" : i >= 6 ? "#ffa502" : "#00d4ff");
+
+  // Timeline — last 20 hours
+  const timeMap = {};
+  anomalies.slice(-3000).forEach(a => {
+    const d = new Date(a.timestamp);
+    const key = `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}h`;
+    timeMap[key] = (timeMap[key]||0)+1;
+  });
+  const timeKeys = Object.keys(timeMap).slice(-16);
+  const timeVals = timeKeys.map(k => timeMap[k]);
+
+  // Protocol pie
+  const protoMap = {};
+  anomalies.forEach(a => { const p = a.protocol||"Unknown"; protoMap[p]=(protoMap[p]||0)+1; });
+  const protoEntries = Object.entries(protoMap).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const pieColors = ["#00d4ff","#ff4757","#2ed573","#ffa502","#a55eea","#fd9644"];
+
+  // Chart configs
+  const chartDefaults = {
+    plugins:{ legend:{ display:false }, tooltip:{ backgroundColor:"#111827", titleFont:{family:"JetBrains Mono",size:11}, bodyFont:{family:"JetBrains Mono",size:11}, borderColor:"#1e2d45", borderWidth:1 } },
+    scales:{ x:{ ticks:{color:"#64748b",font:{size:10}}, grid:{color:"#1e2d4522"} }, y:{ ticks:{color:"#64748b",font:{size:10}}, grid:{color:"#1e2d4522"} } }
+  };
+
+  const timelineData = {
+    labels: timeKeys,
+    datasets: [{ label:"Anomalies", data: timeVals, borderColor:"#00d4ff", backgroundColor:"#00d4ff22", fill:true, tension:0.4, pointRadius:3, pointBackgroundColor:"#00d4ff" }]
+  };
+  const histData = {
+    labels: histLabels,
+    datasets: [{ label:"Count", data: buckets, backgroundColor: histColors, borderColor: histBorders, borderWidth:1, borderRadius:3 }]
+  };
+  const pieData = {
+    labels: protoEntries.map(([k])=>k),
+    datasets: [{ data: protoEntries.map(([,v])=>v), backgroundColor: pieColors.map(c=>c+"99"), borderColor: pieColors, borderWidth:2 }]
+  };
+  const pieOptions = {
+    plugins:{ legend:{ display:true, position:"bottom", labels:{color:"#64748b",font:{family:"JetBrains Mono",size:10},padding:8} }, tooltip: chartDefaults.plugins.tooltip },
+    cutout:"55%"
+  };
+
+  // ── Table ──────────────────────────────────────────────────────────────────
+  const filtered = anomalies.filter(a => {
+    if (filter==="critical") return a.anomaly_score >= 0.85;
+    if (filter==="high")     return a.anomaly_score >= 0.60 && a.anomaly_score < 0.85;
+    if (filter==="medium")   return a.anomaly_score < 0.60;
+    return true;
+  });
+  const totalPages = Math.ceil(filtered.length / PER_PAGE);
+  const rows = [...filtered].reverse().slice((page-1)*PER_PAGE, page*PER_PAGE);
+
+  // ── Loading ────────────────────────────────────────────────────────────────
+  if (loading) return (
+    <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100vh", flexDirection:"column", gap:16 }}>
+      <div style={{ width:40, height:40, border:"3px solid var(--border)", borderTop:"3px solid var(--accent)", borderRadius:"50%", animation:"spin 1s linear infinite" }}/>
+      <span style={{ fontFamily:"var(--font-mono)", color:"var(--text-muted)", fontSize:13 }}>Connecting to Flask API...</span>
+    </div>
+  );
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div style={{ maxWidth:1400, margin:"0 auto", padding:"24px 20px" }}>
+
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:32, flexWrap:"wrap", gap:12 }}>
+        <div>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:4 }}>
+            <div style={{ width:8, height:8, borderRadius:"50%", background: error?"#ff4757":"#2ed573", boxShadow: error?"0 0 8px #ff4757":"0 0 8px #2ed573", animation:"pulse 2s infinite" }}/>
+            <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--text-muted)", letterSpacing:2, textTransform:"uppercase" }}>
+              {error ? "API OFFLINE" : "LIVE MONITORING"}
+            </span>
+          </div>
+          <h1 style={{ fontSize:24, fontWeight:600, fontFamily:"var(--font-mono)", letterSpacing:-0.5 }}>Network Anomaly Detection</h1>
+          <p style={{ color:"var(--text-muted)", fontSize:13, marginTop:4 }}>Random Forest · CICIDS Dataset · Flask + SQLite</p>
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+          {lastRefresh && <span style={{ fontSize:12, color:"var(--text-muted)", fontFamily:"var(--font-mono)" }}>Refreshed {fmtTime(lastRefresh.toISOString())}</span>}
+          <button onClick={fetchData} style={{ background:"var(--surface2)", border:"1px solid var(--border)", color:"var(--accent)", padding:"8px 16px", borderRadius:6, cursor:"pointer", fontFamily:"var(--font-mono)", fontSize:12, letterSpacing:1 }}>
+            ↺ REFRESH
+          </button>
+        </div>
+      </div>
+
+      {/* Error */}
+      {error && <div style={{ background:"#ff475722", border:"1px solid #ff475755", borderRadius:8, padding:"12px 16px", marginBottom:24, fontFamily:"var(--font-mono)", fontSize:13, color:"#ff4757" }}>⚠ {error}</div>}
+
+      {/* Stat cards */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(180px,1fr))", gap:16, marginBottom:32 }}>
+        <StatCard label="Total Anomalies" value={total.toLocaleString()} sub="detected by RF model" accent="var(--accent)" />
+        <StatCard label="Critical"         value={critical.toLocaleString()} sub="score ≥ 0.85" accent="var(--accent2)" />
+        <StatCard label="High Severity"    value={high.toLocaleString()} sub="score 0.60–0.85" accent="var(--warn)" />
+        <StatCard label="Avg Score"        value={avgScore} sub="mean anomaly confidence" accent="var(--accent3)" />
+      </div>
+
+      {/* Charts */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
+        <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:20 }}>
+          <p style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--text-muted)", letterSpacing:2, textTransform:"uppercase", marginBottom:16 }}>Detection Timeline</p>
+          <ChartCanvas type="line" data={timelineData} options={chartDefaults} height={200} />
+        </div>
+        <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:20 }}>
+          <p style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--text-muted)", letterSpacing:2, textTransform:"uppercase", marginBottom:16 }}>Score Distribution</p>
+          <ChartCanvas type="bar" data={histData} options={chartDefaults} height={200} />
+        </div>
+      </div>
+
+      {/* Protocol + Table */}
+      <div style={{ display:"grid", gridTemplateColumns:"260px 1fr", gap:16, marginBottom:32 }}>
+        <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:20 }}>
+          <p style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--text-muted)", letterSpacing:2, textTransform:"uppercase", marginBottom:16 }}>By Protocol</p>
+          <ChartCanvas type="doughnut" data={pieData} options={pieOptions} height={220} />
+        </div>
+
+        {/* Table */}
+        <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:8, padding:20 }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, flexWrap:"wrap", gap:8 }}>
+            <p style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--text-muted)", letterSpacing:2, textTransform:"uppercase" }}>Anomaly Log</p>
+            <div style={{ display:"flex", gap:6 }}>
+              {["all","critical","high","medium"].map(f => (
+                <button key={f} onClick={() => { setFilter(f); setPage(1); }} style={{
+                  background: filter===f ? "var(--accent)" : "var(--surface2)",
+                  color:      filter===f ? "var(--bg)"    : "var(--text-muted)",
+                  border:    `1px solid ${filter===f ? "var(--accent)" : "var(--border)"}`,
+                  borderRadius:4, padding:"4px 10px", cursor:"pointer",
+                  fontFamily:"var(--font-mono)", fontSize:10, textTransform:"uppercase", letterSpacing:1,
+                }}>{f}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ overflowX:"auto" }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+              <thead>
+                <tr style={{ borderBottom:"1px solid var(--border)" }}>
+                  {["ID","Time","Src IP","Dst IP","Protocol","Score","Severity"].map(h => (
+                    <th key={h} style={{ padding:"8px 10px", textAlign:"left", fontFamily:"var(--font-mono)", fontSize:10, color:"var(--text-muted)", letterSpacing:1, textTransform:"uppercase", fontWeight:400 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((a,i) => (
+                  <tr key={a.id} style={{ borderBottom:"1px solid #1e2d4522", background: i%2===0?"transparent":"#1a223511" }}>
+                    <td style={{ padding:"8px 10px", fontFamily:"var(--font-mono)", color:"var(--text-muted)", fontSize:11 }}>#{a.id}</td>
+                    <td style={{ padding:"8px 10px", fontFamily:"var(--font-mono)", fontSize:11, whiteSpace:"nowrap" }}>{fmtTime(a.timestamp)}</td>
+                    <td style={{ padding:"8px 10px", fontFamily:"var(--font-mono)", color:"var(--accent)", fontSize:11 }}>{a.src_ip}</td>
+                    <td style={{ padding:"8px 10px", fontFamily:"var(--font-mono)", fontSize:11 }}>{a.dst_ip}</td>
+                    <td style={{ padding:"8px 10px", fontFamily:"var(--font-mono)", fontSize:11, color:"var(--text-muted)" }}>{a.protocol}</td>
+                    <td style={{ padding:"8px 10px", fontFamily:"var(--font-mono)", fontSize:11, color: scoreColor(a.anomaly_score) }}>{a.anomaly_score.toFixed(4)}</td>
+                    <td style={{ padding:"8px 10px" }}><Badge score={a.anomaly_score} /></td>
+                  </tr>
+                ))}
+                {rows.length===0 && (
+                  <tr><td colSpan={7} style={{ padding:24, textAlign:"center", color:"var(--text-muted)", fontFamily:"var(--font-mono)", fontSize:12 }}>No anomalies match this filter</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          {totalPages > 1 && (
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:12 }}>
+              <span style={{ fontSize:12, color:"var(--text-muted)", fontFamily:"var(--font-mono)" }}>{filtered.length.toLocaleString()} records · page {page}/{totalPages}</span>
+              <div style={{ display:"flex", gap:6 }}>
+                <button onClick={() => setPage(p=>Math.max(1,p-1))} disabled={page===1} style={{ background:"var(--surface2)", border:"1px solid var(--border)", color: page===1?"var(--border)":"var(--text)", borderRadius:4, padding:"4px 10px", cursor:page===1?"default":"pointer", fontFamily:"var(--font-mono)", fontSize:11 }}>← Prev</button>
+                <button onClick={() => setPage(p=>Math.min(totalPages,p+1))} disabled={page===totalPages} style={{ background:"var(--surface2)", border:"1px solid var(--border)", color: page===totalPages?"var(--border)":"var(--text)", borderRadius:4, padding:"4px 10px", cursor:page===totalPages?"default":"pointer", fontFamily:"var(--font-mono)", fontSize:11 }}>Next →</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div style={{ borderTop:"1px solid var(--border)", paddingTop:16, display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
+        <span style={{ fontSize:11, fontFamily:"var(--font-mono)", color:"var(--text-muted)" }}>Network Anomaly Detection System · P1 Elina · KIIT 2026</span>
+        <span style={{ fontSize:11, fontFamily:"var(--font-mono)", color:"var(--text-muted)" }}>Auto-refresh every 30s · {API}</span>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
