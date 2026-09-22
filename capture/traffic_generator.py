@@ -3,6 +3,16 @@ import requests
 import time
 import random
 import threading
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+try:
+    from ml.predict import predict_row
+    ML_ENABLED = True
+    print("[ML] predict_row loaded — model will classify each packet")
+except Exception as e:
+    ML_ENABLED = False
+    print(f"[ML] WARNING: could not load ml/predict.py ({e}). Falling back to CSV labels.")
 
 API_URL = "http://127.0.0.1:5000/api/anomalies"
 
@@ -35,19 +45,24 @@ def make_payload(row):
         except Exception:
             return default
 
-    def safe_float(col, default=0.0):
-        try:
-            v = float(row.get(col, default))
-            return v if pd.notna(v) and v != float("inf") else default
-        except Exception:
-            return default
+    src_ip   = safe("Source IP")
+    dst_ip   = safe("Destination IP")
+    protocol = safe("Protocol")
+
+    if ML_ENABLED:
+        result = predict_row(row.to_dict())
+        label         = result["label"]
+        anomaly_score = result["anomaly_score"]
+    else:
+        label         = safe("Label")
+        anomaly_score = 0.0
 
     return {
-        "src_ip":        safe(" Source IP"),
-        "dst_ip":        safe(" Destination IP"),
-        "protocol":      safe(" Protocol"),
-        "anomaly_score": safe_float(" Flow Duration"),
-        "label":         safe("Label"),
+        "src_ip":        src_ip,
+        "dst_ip":        dst_ip,
+        "protocol":      protocol,
+        "anomaly_score": anomaly_score,
+        "label":         label,
     }
 
 
