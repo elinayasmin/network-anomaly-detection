@@ -16,8 +16,11 @@ except Exception as e:
 
 API_URL = "http://127.0.0.1:5000/api/anomalies"
 
-NORMAL_CSV  = "capture/Monday-WorkingHours.pcap_ISCX.csv"
-ATTACK_CSV  = "capture/Tuesday-WorkingHours.pcap_ISCX.csv"
+NORMAL_CSV   = "capture/Monday-WorkingHours.pcap_ISCX.csv"
+ATTACK_CSVS  = [
+    "capture/Tuesday-WorkingHours.pcap_ISCX.csv",
+    "capture/Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv",
+]
 
 NORMAL_DELAY  = 0.1   # seconds between each normal packet
 ATTACK_BURST  = 20    # how many attack rows per burst
@@ -116,8 +119,13 @@ def normal_stream(normal_df):
 
 # ── Entry point ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    normal_df = load_rows(NORMAL_CSV,  label_filter="BENIGN")
-    attack_df = load_rows(ATTACK_CSV,  label_filter="ATTACK")
+    import pandas as pd
+    normal_df = load_rows(NORMAL_CSV, label_filter="BENIGN")
+    attack_df = pd.concat(
+        [load_rows(f, label_filter="ATTACK") for f in ATTACK_CSVS],
+        ignore_index=True
+    )
+    print(f"  → {len(attack_df)} total attack rows across {len(ATTACK_CSVS)} files")
 
     # Start attack injector in background thread
     t = threading.Thread(target=attack_injector, args=(attack_df,), daemon=True)
