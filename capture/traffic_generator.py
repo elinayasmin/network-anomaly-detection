@@ -49,12 +49,18 @@ def make_payload(row):
     dst_ip   = safe("Destination IP")
     protocol = safe("Protocol")
 
+    csv_label = safe("Label")
+
     if ML_ENABLED:
-        result = predict_row(row.to_dict())
-        label         = result["label"]
+        result        = predict_row(row.to_dict())
         anomaly_score = result["anomaly_score"]
+        if result["label"] == "ATTACK":
+            # keep specific attack type from CSV (e.g. "DoS Hulk", "SSH-Patator")
+            label = csv_label if csv_label.upper() != "BENIGN" else "ATTACK"
+        else:
+            label = "BENIGN"
     else:
-        label         = safe("Label")
+        label         = csv_label
         anomaly_score = 0.0
 
     return {
